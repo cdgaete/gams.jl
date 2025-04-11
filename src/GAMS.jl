@@ -306,6 +306,22 @@ end
 GAMSJob(workspace::GAMSWorkspace, filename::String) = GAMSJob(workspace, filename, "m")
 
 function run(job::GAMSJob; options::Dict{String, Any}, solver_options::Dict{String, Any})
+    # List of GAMS command line parameters that should not be in solver_options
+    gams_params = ["action", "save", "restart", "limrow", "limcol", "solvelink", "optfile",
+                  "curDir", "workDir", "savepoint", "solprint"]
+
+    # Move any GAMS parameters from solver_options to options
+    for param in gams_params
+        if haskey(solver_options, param)
+            @warn "GAMS parameter '$param' found in solver_options. Moving to options."
+            options[param] = solver_options[param]
+            delete!(solver_options, param)
+        end
+    end
+
+    # Check if we're in compile-only mode
+    compile_only = get(options, "action", "") == "C"
+
     # add instructions to write solution gdx
     open(job.filename, "a") do io
         Base.write(io, "Set attr / ")
@@ -362,6 +378,20 @@ function run(job::GAMSJob; options::Dict{String, Any}, solver_options::Dict{Stri
         error("GAMS compilation failed:\n" * open(f -> read(f, String), lst_filepath))
     end
 
+    if compile_only
+        # Return empty solution and stats with required fields
+        sol = GAMSSolution()
+        stats = Dict{String, Any}(
+            "modelStat" => GAMSModelStatus(14), # MODEL_STATUS_NO_SOLUTION_RETURNED
+            "solveStat" => GAMSSolveStatus(12), # SOLVE_STATUS_SKIPPED
+            "numEqu" => 0,
+            "numVar" => 0
+        )
+        return sol, stats
+    end
+
+
+    # Rest of the function remains unchanged
     stats = Dict{String, Any}()
     idx = Vector{Int}(undef, 1)
     vals = Vector{Float64}(undef, max(GAMS_VALUE_LEVEL, GAMS_VALUE_MARGINAL))
